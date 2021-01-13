@@ -39,7 +39,6 @@ VAR
 	Write84						: BOOL := FALSE;						(* zadanie wyslania polecenia 84 - rozbrojenie alarmu *)
 	Write88						: BOOL := FALSE;						(* zadanie wyslania polecenia 88 - wlaczenie wyjscia *)
 	Write89						: BOOL := FALSE;						(* zadanie wyslania polecenia 89 - wylaczenie wyjscia *)
-	(*state: INT :=0;			(* stan transmisji: 0 - wyslij polecenie 7F, 1 - wyslij polecenie 00 *)*)
 	fi: INT;					(* pierwszy  indeks ramki *)
 	fin: INT;				(* drugi indeks ramki *)
 	buf_len: WORD;		(* dlugosc danych w buforze *)
@@ -51,25 +50,14 @@ VAR
 	GetConfig: ETHERNET_GET_NETWORK_CONFIG;
 	utERROR: ETH_ERROR;
 	closeState: INT;		(* status zamykania polaczenia *)
-	(*Rep: INT :=0;			(* liczba powtorzen oczekiwania na odbior danych*)*)
 	Timeout:	TOF_1 := (PT:=T#2s, IN:=TRUE, RST:= FALSE); (* maksymalny czas oczekiwania na odpowiedz ze sterownika *)
-	(*WrongCRC: BOOL :=FALSE;	(* debug*)
-	Com7FSent:INT :=0;(* debug*)
-	Com00Sent: INT :=0;(* debug*)
-	State10iter: INT :=0;(* debug*)
-	State20iter: INT :=0;(* debug*)
-	State30iter: INT:=0;(* debug*)
-	State40iter: INT :=0;(* debug*)
-	AktCzujek: BOOL :=FALSE;(* debug*)
-	Com7FReceived: INT := 0;(* debug*)
-	Com00Received: INT := 0;(* debug*)*)
 	CUR_TIME: TIME;
 	LastStatusRead: TIME;
 	ArmTrig:	R_TRIG;		(* zbocze narastajace sygnalu Arm *)
 	DisarmTrig:	R_TRIG;		(* zbocze narastajace sygnalu Disarm *)
 	ZoneStr:	STRING;
 	ZoneDW:		DWORD;		(* Strefy przeliczone na bity *)
-	Inouts:		BYTE;		(* Wejœcia/wyjœcia grupowane po 8 *)
+	Inouts:		BYTE;		(* Wejscia/wyjscia grupowane po 8 *)
 	wyjscia_prog_1_old: ARRAY [1..128] OF BOOL; (* tablica zawierajaca poprzednie stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie aktywne *)
 	wyjscia_prog_0_old: ARRAY [1..128] OF BOOL; (* tablica zawierajaca poprzednie stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie nieaktywne *)
 	LastOutWrite: TIME;
@@ -102,12 +90,6 @@ IF NOT Write89 THEN
 		wyjscia_prog_0_old[znacznik] := wyjscia_prog_0[znacznik];
 	END_FOR
 END_IF	
-
-(*IF LastOutWrite + OutWriteInterval < CUR_TIME THEN
-	Write88 := TRUE;
-	Write89 := TRUE;
-END_IF*)
-
 
 IF xOpen_Client THEN
 
@@ -157,8 +139,6 @@ IF xOpen_Client THEN
 
 
 		10:(* Write data to server*)
-
-			(*State10iter:=State10iter+1;*)
 			IF  Read0A OR Read00 OR Write88 OR Write89 OR CUR_TIME > LastStatusRead + StatusReadInterval THEN
 				frame_snd[1]:=16#FE;
 				frame_snd[2]:=16#FE;
@@ -189,14 +169,14 @@ IF xOpen_Client THEN
 								frame_snd[(znacznik/2)+3] := frame_snd [znacznik/2+3] + STRING_TO_BYTE(MID (PIN,1,znacznik));
 							END_IF
 						ELSE
-							IF (znacznik MOD 2) > 0 THEN							(* dopelnienie kodu znakami FF do 8 bajtów *)
+							IF (znacznik MOD 2) > 0 THEN							(* dopelnienie kodu znakami FF do 8 bajtow *)
 								frame_snd[(znacznik/2)+4] := 16#F0;
 							ELSE
 								frame_snd[(znacznik/2)+3] := frame_snd[(znacznik/2)+3] + 16#0F;
 							END_IF
 						END_IF
 					END_FOR
-					IF frame_snd[3] >= 16#80 AND frame_snd[3] <= 16#85 THEN			(* obs³uga ramek rozbrojenia i zazbrojenia, kasowania alarmu *) 
+					IF frame_snd[3] >= 16#80 AND frame_snd[3] <= 16#85 THEN			(* obsluga ramek rozbrojenia i zazbrojenia, kasowania alarmu *) 
 						ZoneStr := Zone;
 						Znacznik := INT_TO_BYTE(LEN(ZoneStr));
 						WHILE Znacznik <> 0 DO
@@ -215,9 +195,9 @@ IF xOpen_Client THEN
 
 					ELSIF frame_snd[3] = 16#88 THEN										(* obsluga ramek wlaczenia wyjscia *)
 						fi := 12;
-						FOR znacznik := 0 TO 15 DO										(* powtarzaj dla 16 bajtów *)
+						FOR znacznik := 0 TO 15 DO										(* powtarzaj dla 16 bajtow *)
 							Inouts := 0;
-							FOR fin := 1 TO 8 DO										(* czytaj 8 kolejnych stanów wyjsc do wlaczenia *)
+							FOR fin := 1 TO 8 DO										(* czytaj 8 kolejnych stanow wyjsc do wlaczenia *)
 								IF wyjscia_prog_1[znacznik*8+fin] THEN
 									Inouts := Inouts OR 16#1;
 								END_IF
@@ -282,13 +262,10 @@ IF xOpen_Client THEN
 
 
 		20:	(* Read data*)
-
-			(*State20iter:=State20iter+1;*)
 	 		MyEthernetRead(	EN:= 1, SOCKET:=MyEthernetOpen.SOCKET ,  DATA:=frame_rcv );
 			MyEthernetRead(	EN:= 0, SOCKET:=0 ,  DATA:=frame_rcv );
 
 			Timeout (IN := FALSE);
-			(*Rep:=Rep+1;*)
 			utERROR:=MyEthernetREAD.ERROR;
 			IF(MyEthernetRead.ERROR<>0) THEN								(* Error reading the socket, close it *)
 				Status:=40;
@@ -301,7 +278,6 @@ IF xOpen_Client THEN
 			END_IF
 
 		30: (* Process received data *)
-			(*State30iter:=State30iter+1;*)
 			buf_len:=MyEthernetRead.LEN_OUT;
 			FOR fi:=3 TO buf_len-4 DO 											(* sprawdzenie, czy bajt odebranej ramki nie zawiera kombinacji FE F0; w takim przypadku wyrzuc F0 i skroc odebrane dane *)
 				IF frame_rcv[fi]=16#FE THEN
@@ -367,9 +343,9 @@ IF xOpen_Client THEN
 				ELSIF frame_rcv[3] = 16#EF THEN
 					IntegraStatus := frame_rcv[4];
 					IF frame_snd[3] = 16#88 THEN
-						Write88 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjœæ *)
+						Write88 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjsc *)
 					ELSIF frame_snd[3] = 16#89 THEN
-						Write89 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjœæ *)
+						Write89 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjsc *)
 					END_IF
 				END_IF;
 			END_IF;
@@ -377,8 +353,6 @@ IF xOpen_Client THEN
 			MyEthernetWrite(	EN:= 0 , DATA:=frame_snd );						(* przygotuj nadajnik do nadawania *)
 
 		40:	(* Close the client *)
-
-			(*State40iter:=State40iter+1;*)
 			MyEthernetClose(EN:= 1, SOCKET:= MyEthernetOpen.SOCKET);
 			IF MyEthernetClose.eno THEN
 				MyEthernetClose(EN:= 0);
