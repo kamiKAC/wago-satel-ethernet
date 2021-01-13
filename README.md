@@ -2,7 +2,7 @@
 SatelEthernet module for integration of WAGO PLC with Satel INTEGRA using ETHM-1(Plus) module
 
 </p>Pliki EXP należy zaimportować do Codesys przez menu Projekt->Importuj<p>
-<p>Do poprawnego działania programu potrzebny jest blok TOF_1 z biblioteki <a href=https://oscat.de/>Oscat Basic</a></p>
+<p>Do poprawnego działania programu potrzebny jest blok TOF_1 z biblioteki <a href=http://oscat.de/>Oscat Basic</a></p>
 
 Wejścia:
 <ul>
