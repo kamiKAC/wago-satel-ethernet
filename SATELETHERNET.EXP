@@ -1,0 +1,408 @@
+
+(* @NESTEDCOMMENTS := 'Yes' *)
+(* @PATH := '\/Moje funkcje' *)
+(* @OBJECTFLAGS := '0, 8' *)
+(* @SYMFILEFLAGS := '2048' *)
+FUNCTION_BLOCK SatelEthernet
+VAR_INPUT
+	xOpen_Client: 	BOOL;					(* uaktywnij polaczenie do modulu ETHM-1 *)
+	IP: 			STRING;					(* adres IP  modulu ETHM-1 *)
+	Port: 			WORD;					(* port integracji modulu ETHM-1 *)
+	StatusReadInterval: TIME := T#70ms;
+	(*OutWriteInterval: TIME := T#5s;*)
+	Arm:			BOOL;					(* uzbroj alarm *)
+	Disarm:			BOOL;					(* rozbroj alarm *)
+	PIN:			STRING;					(* kod uzbrojenia/rozbrojenia alarmu *)
+	Zone:			STRING;					(* strefa do uzbrojenia/rozbrojenia *)
+	wyjscia_prog_1: ARRAY [1..128] OF BOOL; (* tablica zawierajaca stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie aktywne *)
+	wyjscia_prog_0: ARRAY [1..128] OF BOOL; (* tablica zawierajaca stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie nieaktywne *)
+END_VAR
+VAR_OUTPUT
+	czujki: ARRAY [1..128] OF BOOL; (* tablica zawierajaca stany czujek od 1 do 128, TRUE - czujka aktywna *)
+	strefy: ARRAY [1..32] OF BOOL;	(* tablica zawierajaca stany stref od 1 do 32, TRUE - strefa uzbrojona *)
+	wyjscia: ARRAY [1..128] OF BOOL; (* tablica zawierajaca stany wyjsc od 1 do 128, TRUE - wyjscie aktywne *)
+	xCLIENT_OPEN: BOOL;			(* polaczenie do modulu ETHM-1 aktywne *)
+	wSOCKET: WORD;				(* numer wtyczki *)
+	IntegraStatus: BYTE;		(* status ostaniego polecenia dla integry (nie status) *)
+END_VAR
+VAR
+	Protocol						: SEL_PROTOCOL 				:= IPPROTO_TCP; (* wybrany protokol transmisji - TCP *)
+	ProtocolType					: SEL_TYPE						:= SOCK_STREAM; (* wybrany typ trasmisji - stream *)
+	MyEthernetOpen				: ETHERNET_CLIENT_OPEN;
+	MyEthernetClose				: ETHERNET_CLIENT_CLOSE;
+	MyEthernetWrite				: ETHERNET_WRITE;
+	MyEthernetRead				: ETHERNET_READ;
+	Read00						: BOOL := TRUE;							(* zadanie wyslania polecenia 00 - odczyt stanu czujek*)
+	Read0A						: BOOL := TRUE;							(* zadanie wyslania polecenia 0A - odczyt stanu uzbrojenia alarmu *)
+	Read17						: BOOL := TRUE;							(* zadanie wyslania polecenia 17 - odczyt stanu wyjsc*)
+	Write80						: BOOL := FALSE;						(* zadanie wyslania polecenia 80 - uzbrojenie alarmu *)
+	Write84						: BOOL := FALSE;						(* zadanie wyslania polecenia 84 - rozbrojenie alarmu *)
+	Write88						: BOOL := FALSE;						(* zadanie wyslania polecenia 88 - wlaczenie wyjscia *)
+	Write89						: BOOL := FALSE;						(* zadanie wyslania polecenia 89 - wylaczenie wyjscia *)
+	(*state: INT :=0;			(* stan transmisji: 0 - wyslij polecenie 7F, 1 - wyslij polecenie 00 *)*)
+	fi: INT;					(* pierwszy  indeks ramki *)
+	fin: INT;				(* drugi indeks ramki *)
+	buf_len: WORD;		(* dlugosc danych w buforze *)
+	znacznik: BYTE := 1;	(* znacznik uzywany do operacji bitowych *)
+	pt: POINTER TO ARRAY [1..1500] OF BYTE; (* wskaznik do tablicy - uzywany przy przekazywaniu tablicy do funkcji *)
+	frame_rcv: ARRAY [1..1500] OF BYTE;	(* tablica danych odebranych *)
+	frame_snd: ARRAY [1..1500] OF BYTE;	(* tablica danych wysylanych *)
+	Status: WORD := 0;	(* status transmisji: 0 - inicjalizacja, 1 - sprawdzenie stosu TCP/IP 4 - inicjalizacja otwarcia polaczenia, 5 - oczekiwanie na otwarcie polaczenia, 10 -wyslanie danych do serwera, 20 - oczekiwanie na odbior danych, 30 - interpretacja otrzymanych danych, 40 - zamykanie polaczenia *)
+	GetConfig: ETHERNET_GET_NETWORK_CONFIG;
+	utERROR: ETH_ERROR;
+	closeState: INT;		(* status zamykania polaczenia *)
+	(*Rep: INT :=0;			(* liczba powtorzen oczekiwania na odbior danych*)*)
+	Timeout:	TOF_1 := (PT:=T#2s, IN:=TRUE, RST:= FALSE); (* maksymalny czas oczekiwania na odpowiedz ze sterownika *)
+	(*WrongCRC: BOOL :=FALSE;	(* debug*)
+	Com7FSent:INT :=0;(* debug*)
+	Com00Sent: INT :=0;(* debug*)
+	State10iter: INT :=0;(* debug*)
+	State20iter: INT :=0;(* debug*)
+	State30iter: INT:=0;(* debug*)
+	State40iter: INT :=0;(* debug*)
+	AktCzujek: BOOL :=FALSE;(* debug*)
+	Com7FReceived: INT := 0;(* debug*)
+	Com00Received: INT := 0;(* debug*)*)
+	CUR_TIME: TIME;
+	LastStatusRead: TIME;
+	ArmTrig:	R_TRIG;		(* zbocze narastajace sygnalu Arm *)
+	DisarmTrig:	R_TRIG;		(* zbocze narastajace sygnalu Disarm *)
+	ZoneStr:	STRING;
+	ZoneDW:		DWORD;		(* Strefy przeliczone na bity *)
+	Inouts:		BYTE;		(* Wejœcia/wyjœcia grupowane po 8 *)
+	wyjscia_prog_1_old: ARRAY [1..128] OF BOOL; (* tablica zawierajaca poprzednie stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie aktywne *)
+	wyjscia_prog_0_old: ARRAY [1..128] OF BOOL; (* tablica zawierajaca poprzednie stany wyjsc do zaprogramowania w centrali od 1 do 128, TRUE - wyjscie nieaktywne *)
+	LastOutWrite: TIME;
+END_VAR
+VAR_IN_OUT
+END_VAR
+
+(* @END_DECLARATION := '0' *)
+CUR_TIME := DWORD_TO_TIME(T_PLC_MS());
+ArmTrig (CLK := Arm);
+DisarmTrig (CLK := Disarm);
+
+Write80 := Write80 OR ArmTrig.Q;
+Write84 := Write84 OR DisarmTrig.Q;
+
+IF NOT Write88 THEN
+	FOR	znacznik := 1 TO 128 DO										
+		IF wyjscia_prog_1[znacznik] AND NOT wyjscia_prog_1_old[znacznik] THEN
+			Write88 := TRUE;
+		END_IF
+		wyjscia_prog_1_old[znacznik] := wyjscia_prog_1[znacznik];
+	END_FOR
+END_IF
+
+IF NOT Write89 THEN
+	FOR	znacznik := 1 TO 128 DO										
+		IF wyjscia_prog_0[znacznik] AND NOT wyjscia_prog_0_old[znacznik] THEN
+			Write89 := TRUE;
+		END_IF
+		wyjscia_prog_0_old[znacznik] := wyjscia_prog_0[znacznik];
+	END_FOR
+END_IF	
+
+(*IF LastOutWrite + OutWriteInterval < CUR_TIME THEN
+	Write88 := TRUE;
+	Write89 := TRUE;
+END_IF*)
+
+
+IF xOpen_Client THEN
+
+	CASE Status OF
+		0:(*Initialize functionblocks*)
+			GetConfig(EN:=FALSE );
+			GetConfig(EN:=TRUE );
+			status:=1;
+			utERROR:=0;
+			wSocket:=0;
+			closeState:=0;
+			xCLIENT_OPEN:=FALSE;
+
+
+		1:(*check ethernet stack*)
+			GetConfig(EN:=TRUE );
+			IF GetConfig.ENO THEN
+				IF GetConfig.IP_ADR<>0 THEN
+					status:=4;(*stack initialized*)
+				ELSE
+					status:=0;(*try again*)
+				END_IF
+			END_IF
+
+
+		4:(*open connection*)
+			MyEthernetRead(	EN:= 0, SOCKET:=0 ,  DATA:=frame_rcv );
+			MyEthernetClose(EN:= 0);
+			MyEthernetOpen(EN:=0);
+
+			MyEthernetOpen(EN:=1 , TYP:=ProtocolType	 , PROTO:=Protocol , IP_ADR:= IP_ADDRESS(IP), PORT:=Port );
+			status:=5;
+
+		5:(*wait for server response according to client  request to open the connection*)
+			MyEthernetOpen(EN:=1, TYP:=ProtocolType, PROTO:=Protocol, IP_ADR:= IP_ADDRESS(IP), PORT:=Port );
+			IF  MyEthernetOpen.ENO = 1 THEN
+				IF MyEthernetOpen.ERROR = 0 THEN
+					Status  := 10; (*socket available*)
+					xCLIENT_OPEN:=TRUE;
+					wSOCKET	:=MyEthernetOpen.socket;
+					MyEthernetWrite(	EN:= 0 , DATA:=frame_snd );
+				ELSE
+					Status := 0; (*no socket available, try it again *)
+				END_IF;
+				utERROR:=MyEthernetOpen.ERROR;
+			END_IF
+
+
+		10:(* Write data to server*)
+
+			(*State10iter:=State10iter+1;*)
+			IF  Read0A OR Read00 OR Write88 OR Write89 OR CUR_TIME > LastStatusRead + StatusReadInterval THEN
+				frame_snd[1]:=16#FE;
+				frame_snd[2]:=16#FE;
+				IF Write80 THEN
+					frame_snd[3]:=16#80;											(* uzbrojenie *)
+				ELSIF Write84 THEN
+					frame_snd[3]:=16#84;											(* rozbrojenie *)
+				ELSIF Write88 THEN
+					frame_snd[3]:=16#88;											(* wlaczenie wyjscia *)
+				ELSIF Write89 THEN
+					frame_snd[3]:=16#89;											(* wylaczenie wyjscia *)
+				ELSIF Read00 THEN
+					frame_snd[3]:=16#00;											(* zapytanie o stan czujek *)
+				ELSIF Read0A THEN
+					frame_snd[3]:=16#0A;											(* zapytanie o stan uzbrojenia alarmu *)
+				ELSIF Read17 THEN
+					frame_snd[3]:=16#17;											(* zapytanie o stan wyjsc *)
+				ELSE 
+					frame_snd[3]:=16#7F;											(* zapytanie o zmiane stanu *)
+				END_IF
+				pt:=ADR(frame_snd);
+				IF frame_snd[3] >= 16#80 AND frame_snd[3] <= 16#8A THEN
+					FOR	znacznik := 1 TO 16 DO										(* zamiana 16 znakow kodu na 8 bajtow *)
+						IF (znacznik) <= LEN(PIN) THEN
+							IF (znacznik MOD 2) > 0 THEN
+  								frame_snd[(znacznik/2)+4] := SHL(STRING_TO_BYTE(MID (PIN,1,znacznik)),4);
+							ELSE
+								frame_snd[(znacznik/2)+3] := frame_snd [znacznik/2+3] + STRING_TO_BYTE(MID (PIN,1,znacznik));
+							END_IF
+						ELSE
+							IF (znacznik MOD 2) > 0 THEN							(* dopelnienie kodu znakami FF do 8 bajtów *)
+								frame_snd[(znacznik/2)+4] := 16#F0;
+							ELSE
+								frame_snd[(znacznik/2)+3] := frame_snd[(znacznik/2)+3] + 16#0F;
+							END_IF
+						END_IF
+					END_FOR
+					IF frame_snd[3] >= 16#80 AND frame_snd[3] <= 16#85 THEN			(* obs³uga ramek rozbrojenia i zazbrojenia, kasowania alarmu *) 
+						ZoneStr := Zone;
+						Znacznik := INT_TO_BYTE(LEN(ZoneStr));
+						WHILE Znacznik <> 0 DO
+							Znacznik := INT_TO_BYTE (FIND (ZoneStr,','));
+							IF Znacznik <> 0 THEN
+								ZoneDW := ZoneDW OR SHL(1,(STRING_TO_INT (MID (ZoneStr, 1, Znacznik-1)))-1);
+								ZoneStr:= DELETE (ZoneStr, Znacznik, 1);
+							ELSE
+								ZoneDW := ZoneDW OR SHL(1,(STRING_TO_INT (ZoneStr))-1);
+							END_IF	
+						END_WHILE;
+						FOR znacznik := 0 TO 3 DO										(* zamiania numeru strefy na bit *)
+							frame_snd[znacznik+12] := DWORD_TO_BYTE(SHL(ZoneDW,Znacznik*8));
+						END_FOR
+						fi := 16;
+
+					ELSIF frame_snd[3] = 16#88 THEN										(* obsluga ramek wlaczenia wyjscia *)
+						fi := 12;
+						FOR znacznik := 0 TO 15 DO										(* powtarzaj dla 16 bajtów *)
+							Inouts := 0;
+							FOR fin := 1 TO 8 DO										(* czytaj 8 kolejnych stanów wyjsc do wlaczenia *)
+								IF wyjscia_prog_1[znacznik*8+fin] THEN
+									Inouts := Inouts OR 16#1;
+								END_IF
+								Inouts := ROR(Inouts,1);
+							END_FOR
+							frame_snd[fi+znacznik] := Inouts;							(* zapis bajtu ramki *)
+						END_FOR
+						LastOutWrite := CUR_TIME;
+						fi:= 28;														(* zapisuj od bajtu 28 *)
+
+					ELSIF frame_snd[3] = 16#89 THEN
+						fi := 12;
+						FOR znacznik := 0 TO 15 DO
+							Inouts := 0;
+							FOR fin := 1 TO 8 DO
+								IF wyjscia_prog_0[znacznik*8+fin] THEN
+									Inouts := Inouts OR 16#1;
+								END_IF
+								Inouts := ROR(Inouts,1);
+							END_FOR
+							frame_snd[fi+znacznik] := Inouts;
+						END_FOR
+						LastOutWrite := CUR_TIME;
+						fi:= 28;
+					END_IF
+					frame_snd[fi]:=WORD_TO_BYTE(SHR(SatelCRC(pt,3,fi-1),8));		(* obliczenie CRC.H *)
+					frame_snd[fi+1]:=WORD_TO_BYTE(SatelCRC(pt,3,fi-1));				(* obliczenie CRC.L *)
+					frame_snd[fi+2]:=16#FE;
+					frame_snd[fi+3]:=16#0D;		
+					MyEthernetWrite(EN:= 1,SOCKET:= MyEthernetOpen.SOCKET, LEN_IN:=fi+3, DATA:=frame_snd); (* wyslanie ramki *)
+				ELSE					
+					frame_snd[4]:=WORD_TO_BYTE(SHR(SatelCRC(pt,3,3),8));		(* obliczenie CRC.H *)
+					frame_snd[5]:=WORD_TO_BYTE(SatelCRC(pt,3,3));				(* obliczenie CRC.L *)
+					frame_snd[6]:=16#FE;
+					frame_snd[7]:=16#0D;
+					MyEthernetWrite(EN:= 1,SOCKET:= MyEthernetOpen.SOCKET, LEN_IN:=7,DATA:=frame_snd); (* wyslanie ramki *)
+				END_IF
+
+				IF MyEthernetWrite.eno THEN
+					IF(MyEthernetWrite.ERROR <>0) THEN
+						Status:=40;													(* Error writing to the socket, close it *)
+					ELSIF frame_snd[3] >= 16#80 AND frame_snd[3] <= 16#85 THEN
+							Write80 := FALSE;
+							Write84 := FALSE;
+							Status := 15;	(* Write complete, write next data *)
+					ELSE
+						Status:=20; (* Write complete, read data *)
+						(*IF state=0 THEN
+							Com7FSent:=Com7FSent+1;
+						ELSIF state=1 THEN
+							Com00Sent:=Com00Sent+1;
+						END_IF*)
+					END_IF;
+					utERROR:=MyEthernetWrite.ERROR;
+				END_IF
+				Timeout (IN := FALSE);
+			END_IF
+
+		15: (* Just prepare for sending next data *)
+			Status:=10;															(* przejdz do wysylania danych *)
+			MyEthernetWrite(	EN:= 0 , DATA:=frame_snd );						(* przygotuj nadajnik do nadawania *)
+
+
+		20:	(* Read data*)
+
+			(*State20iter:=State20iter+1;*)
+	 		MyEthernetRead(	EN:= 1, SOCKET:=MyEthernetOpen.SOCKET ,  DATA:=frame_rcv );
+			MyEthernetRead(	EN:= 0, SOCKET:=0 ,  DATA:=frame_rcv );
+
+			Timeout (IN := FALSE);
+			(*Rep:=Rep+1;*)
+			utERROR:=MyEthernetREAD.ERROR;
+			IF(MyEthernetRead.ERROR<>0) THEN								(* Error reading the socket, close it *)
+				Status:=40;
+			ELSIF (MyEthernetRead.LEN_OUT <> 0) THEN  						(* Process the data received via the ethernet port *)
+				Timeout(IN := TRUE);
+				Status:=30;
+			ELSIF NOT Timeout.Q THEN
+				Timeout(IN := TRUE);
+				Status:=10;														(* uplynal czas oczeiwania na odpowiedz, zerowanie licznika i ponowne wyslanie zapytania *)
+			END_IF
+
+		30: (* Process received data *)
+			(*State30iter:=State30iter+1;*)
+			buf_len:=MyEthernetRead.LEN_OUT;
+			FOR fi:=3 TO buf_len-4 DO 											(* sprawdzenie, czy bajt odebranej ramki nie zawiera kombinacji FE F0; w takim przypadku wyrzuc F0 i skroc odebrane dane *)
+				IF frame_rcv[fi]=16#FE THEN
+					IF frame_rcv [fi+1]=16#F0 THEN
+						FOR fin:=fi+1 TO buf_len-2 DO
+							frame_rcv[fin]:= frame_rcv[fin+1];
+						END_FOR
+						buf_len:=buf_len-1;
+					END_IF;
+				END_IF;
+			END_FOR;
+			pt:=ADR(frame_rcv);													(* przekazanie adresu znacznika danych odebranych - potrzebne do przekazania danych do obliczenia CRC *)
+			IF frame_rcv[buf_len-3]=WORD_TO_BYTE(SHR(SatelCRC(pt,3,buf_len-4),8)) AND frame_rcv[buf_len-2]=WORD_TO_BYTE(SatelCRC(pt,3,buf_len-4)) THEN (* sprawdzenie poprawnosci CRC otrzymanych danych *)
+				IF frame_rcv[3]=16#7F THEN										(* jesli otrzymano ramke zapytania o zmiane stanu *)
+					znacznik:=1;
+					(*Com7FReceived:=Com7FReceived+1;*)
+					IF (frame_rcv[4] AND znacznik) >0 THEN						(* sprawdzenie czy bit 0 pierwszego bajtu danych jest 1, czyli stan czujek ulegl zmianie *)
+						Read00:=TRUE;											(* jesli tak, nastepnym razem zapytaj o stan czujek *)
+					END_IF;
+					IF (frame_rcv[5] AND ROL(znacznik,2)) >0 THEN			(* sprawdzenie czy bit 2 drugiego bajtu danych jest 1, czyli stan stref ulegl zmianie *)
+						Read0A:=TRUE;											(* jesli tak, nastepnym razem zapytaj o stan stref*)
+					END_IF;
+					IF (frame_rcv[6] AND ROL(znacznik,7)) >0 THEN			(* sprawdzenie czy bit 7 trzeciego bajtu danych jest 1, czyli stan wyjsc ulegl zmianie *)
+						Read17:=TRUE;											(* jesli tak, nastepnym razem zapytaj o stan wyjsc*)
+					END_IF;
+					LastStatusRead := CUR_TIME;
+				ELSIF frame_rcv[3] = 16#00 THEN								(* jesli otrzymano ramke stanu czujek *)
+					(*Com00Received:=Com00Received+1;*)
+					znacznik:=1;
+					FOR fi:=4 TO buf_len-5 DO									(* dla kazdego bajtu danych *)
+						FOR fin:=0 TO 7 DO										(* dla kazdego bitu *)
+							IF (SHL(znacznik,fin) AND frame_rcv[fi]) >0 THEN	(* sprawdz czy bit jest 1 *)
+								czujki[(fi-4)*8+fin+1]:=TRUE;						(* jesli tak stan czujki = TRUE - aktywna *)
+							ELSE
+								czujki[(fi-4)*8+fin+1]:=FALSE;						(* jesli nie = FALSE - nieaktywna *)
+							END_IF;
+						END_FOR;
+					END_FOR;
+					(*AktCzujek := TRUE;*)
+					Read00 := FALSE;											(* nastepnym razem nie pytaj o czujki *)
+				ELSIF frame_rcv[3] = 16#17 THEN
+					FOR fi:=4 TO buf_len-5 DO									(* dla kazdego bajtu danych *)
+						FOR fin:=0 TO 7 DO										(* dla kazdego bitu *)
+							IF (SHL(znacznik,fin) AND frame_rcv[fi]) >0 THEN	(* sprawdz czy bit jest 1 *)
+								wyjscia[(fi-4)*8+fin+1]:=TRUE;						(* jesli tak stan wyjscia = TRUE - aktywne *)
+							ELSE
+								wyjscia[(fi-4)*8+fin+1]:=FALSE;						(* jesli nie = FALSE - nieaktywne *)
+							END_IF;
+						END_FOR;
+					END_FOR;
+					Read17 := FALSE;											(* nastepnym razem nie pytaj o wyjscia *)
+				ELSIF frame_rcv[3] = 16#0A THEN
+					FOR fi:=4 TO buf_len-5 DO									(* dla kazdego bajtu danych *)
+						FOR fin:=0 TO 7 DO										(* dla kazdego bitu *)
+							IF (SHL(znacznik,fin) AND frame_rcv[fi]) >0 THEN	(* sprawdz czy bit jest 1 *)
+								strefy[(fi-4)*8+fin+1]:=TRUE;						(* jesli tak stan strefy = TRUE - uzbrojona *)
+							ELSE
+								strefy[(fi-4)*8+fin+1]:=FALSE;						(* jesli nie = FALSE - rozbrojona *)
+							END_IF;
+						END_FOR;
+					END_FOR;
+					Read0A := FALSE;											(* nastepnym razem nie pytaj o strefy *)
+				ELSIF frame_rcv[3] = 16#EF THEN
+					IntegraStatus := frame_rcv[4];
+					IF frame_snd[3] = 16#88 THEN
+						Write88 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjœæ *)
+					ELSIF frame_snd[3] = 16#89 THEN
+						Write89 := FALSE;										(* nastepnym razem nie ustawiaj/zeruj wyjœæ *)
+					END_IF
+				END_IF;
+			END_IF;
+			Status:=10;															(* przejdz do wysylania danych *)
+			MyEthernetWrite(	EN:= 0 , DATA:=frame_snd );						(* przygotuj nadajnik do nadawania *)
+
+		40:	(* Close the client *)
+
+			(*State40iter:=State40iter+1;*)
+			MyEthernetClose(EN:= 1, SOCKET:= MyEthernetOpen.SOCKET);
+			IF MyEthernetClose.eno THEN
+				MyEthernetClose(EN:= 0);
+				xCLIENT_OPEN:=FALSE;
+				Status := 0; (* Try to open the server again *)
+			END_IF
+
+	END_CASE;
+ELSE
+	CASE CloseState OF
+	0:
+		MyEthernetClose(EN:= 0);
+		MyEthernetClose(EN:= 1, SOCKET:= MyEthernetOpen.SOCKET);
+		CloseState:=1;
+	1:
+		MyEthernetClose(EN:= 1, SOCKET:= MyEthernetOpen.SOCKET);
+		IF MyEthernetClose.eno THEN
+			MyEthernetClose(EN:= 0);
+			CloseState:=2;
+		END_IF
+	2:
+		Status := 0;
+		utERROR:=0;
+		xCLIENT_OPEN:=FALSE;
+	END_CASE
+END_IF
+END_FUNCTION_BLOCK
