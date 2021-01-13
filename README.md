@@ -27,7 +27,7 @@ Wyjścia:
 <li>IntegraStatus:          BYTE;	- status ostaniego polecenia dla centrali INTEGRA:
 <ul>
 <li>0x00 - ok
-<li>0x01 - wprowadzony PIN został odnaleziony
+<li>0x01 - wprowadzony PIN nie został odnaleziony
 <li>0x02 - brak dostępu
 <li>0x03 - wybrany użytkownik nie istnieje
 <li>0x04 - wybrany użytkownik już istnieje
