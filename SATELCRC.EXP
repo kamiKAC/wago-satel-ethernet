@@ -1,0 +1,23 @@
+
+(* @NESTEDCOMMENTS := 'Yes' *)
+(* @PATH := '\/Moje funkcje' *)
+(* @OBJECTFLAGS := '0, 8' *)
+(* @SYMFILEFLAGS := '2048' *)
+FUNCTION SatelCRC : WORD
+VAR_INPUT
+	pt: POINTER TO ARRAY [1..1500] OF BYTE;
+	start_pos: INT;
+	end_pos: INT;
+END_VAR
+VAR
+	i: INT :=0;
+END_VAR
+(* @END_DECLARATION := '0' *)
+SatelCRC:= 16#147A;
+FOR i:=start_pos TO end_pos DO
+	SatelCRC:= ROL(SatelCRC,1);
+	SatelCRC:= SatelCRC XOR 16#FFFF;
+	SatelCRC:= SatelCRC + SHR(SatelCRC,8) + pt^[i];
+END_FOR
+
+END_FUNCTION

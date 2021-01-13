@@ -1,0 +1,62 @@
+
+(* @NESTEDCOMMENTS := 'Yes' *)
+(* @PATH := '\/Moje funkcje' *)
+(* @OBJECTFLAGS := '0, 8' *)
+(* @SYMFILEFLAGS := '2048' *)
+FUNCTION IP_ADDRESS : DWORD
+VAR_INPUT
+	IP_ADR	:	STRING;
+END_VAR
+VAR
+	Address 	:	DWORD;
+	Value		:	WORD;
+	DecimalPos	:	INT;
+	Rest		:	STRING;
+END_VAR
+
+(* @END_DECLARATION := '0' *)
+Address := STRING_TO_WORD(IP_ADR);
+IF (Address <= 255) AND (Address >= 0) THEN
+	DecimalPos := FIND(IP_ADR,'.');
+	IF DecimalPos <> 0 THEN
+		Rest := RIGHT(IP_ADR,LEN(IP_ADR) - DecimalPos);
+		Value := STRING_TO_WORD(Rest);
+		IF (Value <= 255) AND (Value >= 0) THEN
+			Address := (Address * 16#0100) + Value;
+
+			DecimalPos := FIND(Rest,'.');
+			IF DecimalPos <> 0 THEN
+				Rest := RIGHT(IP_ADR,LEN(Rest) - DecimalPos);
+				Value := STRING_TO_WORD(Rest);
+				IF (Value <= 255) AND (Value >= 0) THEN
+					Address := (Address * 16#0100) + Value;
+
+					DecimalPos := FIND(Rest,'.');
+					IF DecimalPos <> 0 THEN
+						Rest := RIGHT(IP_ADR,LEN(Rest) - DecimalPos);
+						Value := STRING_TO_WORD(Rest);
+						IF (Value <= 255) AND (Value >= 0) THEN
+							Address := (Address * 16#0100) + Value;
+						ELSE
+							Address := 0;
+						END_IF
+					ELSE
+						Address := 0;
+					END_IF
+				ELSE
+					Address := 0;
+				END_IF
+			ELSE
+				Address := 0;
+			END_IF
+		ELSE
+			Address := 0;
+		END_IF
+	ELSE
+		Address := 0;
+	END_IF
+ELSE
+	Address := 0;
+END_IF
+IP_ADDRESS := Address;
+END_FUNCTION
