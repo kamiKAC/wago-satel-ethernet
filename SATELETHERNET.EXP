@@ -307,7 +307,7 @@ IF xOpen_Client THEN
 				ELSIF frame_rcv[3] = 16#00 THEN								(* jesli otrzymano ramke stanu czujek *)
 					(*Com00Received:=Com00Received+1;*)
 					znacznik:=1;
-					FOR fi:=4 TO buf_len-5 DO									(* dla kazdego bajtu danych *)
+					FOR fi:=4 TO buf_len-4 DO									(* dla kazdego bajtu danych *)
 						FOR fin:=0 TO 7 DO										(* dla kazdego bitu *)
 							IF (SHL(znacznik,fin) AND frame_rcv[fi]) >0 THEN	(* sprawdz czy bit jest 1 *)
 								czujki[(fi-4)*8+fin+1]:=TRUE;						(* jesli tak stan czujki = TRUE - aktywna *)
